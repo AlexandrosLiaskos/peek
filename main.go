@@ -12,28 +12,32 @@ import (
 	"golang.org/x/term"
 )
 
-const maxNameLen = 45
+const maxNameLen = 40
 
 var (
-	// Panel headers
-	headerStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#005c2e")).Bold(true)
-	borderStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#003d1a"))
+	// Box border
+	boxBorder = lipgloss.RoundedBorder()
+
+	// Title inside box
+	titleStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#00ff66")).
+			Bold(true)
 
 	// Dir names
-	dirNameStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#00ff66")).Bold(true)
-	dotDirStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("#006633")).Bold(true)
+	dirNameStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#00ff66"))
+	dotDirStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("#005c2e"))
 
 	// File names
 	fileNameStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#00cc55"))
-	dotFileStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("#006633"))
+	dotFileStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("#005c2e"))
 
-	// Subtitle: size · ext
-	subStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#004d26")).Italic(true)
+	// Size subtitle
+	subStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#003d1a")).Italic(true)
 
 	// Symlinks
 	symNameStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#00ffaa"))
 
-	// Count / footer
+	// Footer
 	countStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#003d1a"))
 
 	// Error
@@ -75,7 +79,7 @@ func main() {
 
 	entries, err := os.ReadDir(target)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, errStyle.Render("  error: "+err.Error()))
+		fmt.Fprintln(os.Stderr, errStyle.Render("error: "+err.Error()))
 		os.Exit(1)
 	}
 
@@ -146,160 +150,126 @@ func main() {
 		width = w
 	}
 
-	// Files-only mode: single panel
+	gap := 2
+	// Border takes 2 chars each side + 2 padding = 6 per panel
+	panelOuter := (width - gap) / 2
+	innerW := panelOuter - 4 // 2 border + 2 padding
+
+	if innerW < 20 {
+		innerW = 20
+	}
+
+	nameMax := innerW - 2
+	if nameMax > maxNameLen {
+		nameMax = maxNameLen
+	}
+
+	boxStyle := lipgloss.NewStyle().
+		Border(boxBorder).
+		BorderForeground(lipgloss.Color("#004d26")).
+		Padding(1, 2).
+		Width(innerW)
+
+	// Build dir content
+	dirContent := buildDirContent(dirs, nameMax)
+	// Build file content
+	fileContent := buildFileContent(files, nameMax)
+
+	// Single panel modes
 	if filesOnly || len(dirs) == 0 {
-		renderSingle(files, "files", width)
+		wideInner := width - 6
+		if wideInner < 20 {
+			wideInner = 20
+		}
+		wideMax := wideInner - 2
+		if wideMax > maxNameLen {
+			wideMax = maxNameLen
+		}
+		wideBox := lipgloss.NewStyle().
+			Border(boxBorder).
+			BorderForeground(lipgloss.Color("#004d26")).
+			Padding(1, 2).
+			Width(wideInner)
+		fc := buildFileContent(files, wideMax)
+		panel := wideBox.Render(titleStyle.Render("FILES") + "\n\n" + fc)
+		fmt.Println()
+		fmt.Println(panel)
+		fmt.Println()
 		printFooter(len(dirs), len(files))
 		return
 	}
 
-	// No files: single panel dirs
 	if len(files) == 0 {
-		renderSingle(dirs, "dirs", width)
+		wideInner := width - 6
+		if wideInner < 20 {
+			wideInner = 20
+		}
+		wideMax := wideInner - 2
+		if wideMax > maxNameLen {
+			wideMax = maxNameLen
+		}
+		wideBox := lipgloss.NewStyle().
+			Border(boxBorder).
+			BorderForeground(lipgloss.Color("#004d26")).
+			Padding(1, 2).
+			Width(wideInner)
+		dc := buildDirContent(dirs, wideMax)
+		panel := wideBox.Render(titleStyle.Render("DIRS") + "\n\n" + dc)
+		fmt.Println()
+		fmt.Println(panel)
+		fmt.Println()
 		printFooter(len(dirs), len(files))
 		return
 	}
 
-	// Side-by-side
-	gap := 4
-	panelW := (width - gap) / 2
+	// Two panels side by side
+	leftPanel := boxStyle.Render(titleStyle.Render("DIRS") + "\n\n" + dirContent)
+	rightPanel := boxStyle.Render(titleStyle.Render("FILES") + "\n\n" + fileContent)
 
-	leftLines := buildDirPanel(dirs, panelW)
-	rightLines := buildFilePanel(files, panelW)
+	joined := lipgloss.JoinHorizontal(lipgloss.Top, leftPanel, strings.Repeat(" ", gap), rightPanel)
 
-	// Pad to equal height
-	maxLines := len(leftLines)
-	if len(rightLines) > maxLines {
-		maxLines = len(rightLines)
-	}
-	for len(leftLines) < maxLines {
-		leftLines = append(leftLines, "")
-	}
-	for len(rightLines) < maxLines {
-		rightLines = append(rightLines, "")
-	}
-
-	gapStr := strings.Repeat(" ", gap)
 	fmt.Println()
-	for i := 0; i < maxLines; i++ {
-		left := padToWidth(leftLines[i], panelW)
-		fmt.Println(left + gapStr + rightLines[i])
-	}
+	fmt.Println(joined)
 	fmt.Println()
 	printFooter(len(dirs), len(files))
 }
 
-func buildDirPanel(dirs []entry, panelW int) []string {
+func buildDirContent(dirs []entry, nameMax int) string {
 	var lines []string
-
-	// Header
-	label := headerStyle.Render("dirs")
-	lineW := panelW - visLen(label) - 2
-	if lineW < 2 {
-		lineW = 2
-	}
-	lines = append(lines, "  "+label+" "+borderStyle.Render(strings.Repeat("─", lineW)))
-	lines = append(lines, "")
-
-	nameMax := panelW - 4
-	if nameMax > maxNameLen {
-		nameMax = maxNameLen
-	}
-
 	for _, d := range dirs {
 		name := truncate(d.name, nameMax)
 		switch {
 		case d.isSym:
-			lines = append(lines, "  "+symNameStyle.Render(name))
+			lines = append(lines, symNameStyle.Render(name))
 		case d.dot:
-			lines = append(lines, "  "+dotDirStyle.Render(name))
+			lines = append(lines, dotDirStyle.Render(name))
 		default:
-			lines = append(lines, "  "+dirNameStyle.Render(name))
+			lines = append(lines, dirNameStyle.Render(name))
 		}
 	}
-
-	return lines
+	return strings.Join(lines, "\n")
 }
 
-func buildFilePanel(files []entry, panelW int) []string {
+func buildFileContent(files []entry, nameMax int) string {
 	var lines []string
-
-	// Header
-	label := headerStyle.Render("files")
-	lineW := panelW - visLen(label) - 2
-	if lineW < 2 {
-		lineW = 2
-	}
-	lines = append(lines, "  "+label+" "+borderStyle.Render(strings.Repeat("─", lineW)))
-	lines = append(lines, "")
-
-	nameMax := panelW - 4
-	if nameMax > maxNameLen {
-		nameMax = maxNameLen
-	}
-
 	for _, f := range files {
 		name := truncate(f.name, nameMax)
 		switch {
 		case f.isSym:
-			lines = append(lines, "  "+symNameStyle.Render(name))
+			lines = append(lines, symNameStyle.Render(name))
 		case f.dot:
-			lines = append(lines, "  "+dotFileStyle.Render(name))
+			lines = append(lines, dotFileStyle.Render(name))
 		default:
-			lines = append(lines, "  "+fileNameStyle.Render(name))
+			lines = append(lines, fileNameStyle.Render(name))
 		}
 
-		// Size subtitle
 		parts := []string{humanSize(f.size)}
 		if f.ext != "" {
 			parts = append(parts, f.ext)
 		}
-		lines = append(lines, "  "+subStyle.Render("  "+strings.Join(parts, " · ")))
+		lines = append(lines, subStyle.Render(strings.Join(parts, " · ")))
 	}
-
-	return lines
-}
-
-func renderSingle(items []entry, label string, width int) {
-	lineW := width - visLen(label) - 4
-	if lineW < 2 {
-		lineW = 2
-	}
-
-	fmt.Println()
-	fmt.Println("  " + headerStyle.Render(label) + " " + borderStyle.Render(strings.Repeat("─", lineW)))
-	fmt.Println()
-
-	nameMax := width - 6
-	if nameMax > maxNameLen {
-		nameMax = maxNameLen
-	}
-
-	isFile := label == "files"
-
-	for _, it := range items {
-		name := truncate(it.name, nameMax)
-		switch {
-		case it.isSym:
-			fmt.Println("  " + symNameStyle.Render(name))
-		case it.dot && it.isDir:
-			fmt.Println("  " + dotDirStyle.Render(name))
-		case it.isDir:
-			fmt.Println("  " + dirNameStyle.Render(name))
-		case it.dot:
-			fmt.Println("  " + dotFileStyle.Render(name))
-		default:
-			fmt.Println("  " + fileNameStyle.Render(name))
-		}
-
-		if isFile {
-			parts := []string{humanSize(it.size)}
-			if it.ext != "" {
-				parts = append(parts, it.ext)
-			}
-			fmt.Println("  " + subStyle.Render("  "+strings.Join(parts, " · ")))
-		}
-	}
+	return strings.Join(lines, "\n")
 }
 
 func printFooter(dirCount, fileCount int) {
@@ -323,39 +293,13 @@ func printFooter(dirCount, fileCount int) {
 }
 
 func truncate(s string, max int) string {
+	if max < 4 {
+		max = 4
+	}
 	if len(s) <= max {
 		return s
 	}
 	return s[:max-1] + "…"
-}
-
-// padToWidth pads a string (which may contain ANSI codes) to a visual width
-func padToWidth(s string, width int) string {
-	vl := visLen(s)
-	if vl >= width {
-		return s
-	}
-	return s + strings.Repeat(" ", width-vl)
-}
-
-// visLen returns the visible length of a string, stripping ANSI escape codes
-func visLen(s string) int {
-	n := 0
-	inEsc := false
-	for _, r := range s {
-		if r == '\x1b' {
-			inEsc = true
-			continue
-		}
-		if inEsc {
-			if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') {
-				inEsc = false
-			}
-			continue
-		}
-		n++
-	}
-	return n
 }
 
 func humanSize(b int64) string {
