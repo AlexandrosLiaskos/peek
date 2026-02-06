@@ -9,10 +9,11 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/mattn/go-runewidth"
 	"golang.org/x/term"
 )
 
-const maxNameLen = 40
+const maxNameLen = 80
 
 var (
 	// Box border
@@ -179,15 +180,15 @@ func main() {
 	}
 
 	gap := 2
-	// Border takes 2 chars each side + 2 padding = 6 per panel
+	// Width() includes padding but not border; border adds 2
 	panelOuter := (width - gap) / 2
-	innerW := panelOuter - 4 // 2 border + 2 padding
+	innerW := panelOuter - 2 // subtract border only
 
 	if innerW < 20 {
 		innerW = 20
 	}
 
-	nameMax := innerW - 6 // content area minus padding
+	nameMax := innerW - 4 // subtract horizontal padding (2 each side)
 	if nameMax > maxNameLen {
 		nameMax = maxNameLen
 	}
@@ -207,11 +208,11 @@ func main() {
 
 	// Single panel modes
 	if filesOnly || len(dirs) == 0 {
-		wideInner := width - 6
+		wideInner := width - 2 // full width minus border
 		if wideInner < 20 {
 			wideInner = 20
 		}
-		wideMax := wideInner - 2
+		wideMax := wideInner - 4 // minus padding
 		if wideMax > maxNameLen {
 			wideMax = maxNameLen
 		}
@@ -231,11 +232,11 @@ func main() {
 	}
 
 	if len(files) == 0 {
-		wideInner := width - 6
+		wideInner := width - 2 // full width minus border
 		if wideInner < 20 {
 			wideInner = 20
 		}
-		wideMax := wideInner - 2
+		wideMax := wideInner - 4 // minus padding
 		if wideMax > maxNameLen {
 			wideMax = maxNameLen
 		}
@@ -276,7 +277,7 @@ func buildDirContent(dirs []entry, lineWidth int) string {
 	for _, d := range dirs {
 		sub := dirSubtitle(d.subDirs, d.subFiles)
 		// ▸ prefix takes 2 chars
-		nameLimit := lineWidth - len(sub) - 5
+		nameLimit := lineWidth - runewidth.StringWidth(sub) - 5
 		if nameLimit < 8 {
 			nameLimit = 8
 		}
@@ -293,7 +294,7 @@ func buildDirContent(dirs []entry, lineWidth int) string {
 		}
 
 		prefix := dirIndicator.Render("▸") + " "
-		dots := lineWidth - len(name) - len(sub) - 2
+		dots := lineWidth - runewidth.StringWidth(name) - runewidth.StringWidth(sub) - 2
 		if dots < 3 {
 			dots = 3
 		}
@@ -307,7 +308,7 @@ func buildFileContent(files []entry, lineWidth int) string {
 	var lines []string
 	for _, f := range files {
 		sz := humanSize(f.size)
-		nameLimit := lineWidth - len(sz) - 5
+		nameLimit := lineWidth - runewidth.StringWidth(sz) - 5
 		if nameLimit < 8 {
 			nameLimit = 8
 		}
@@ -325,7 +326,7 @@ func buildFileContent(files []entry, lineWidth int) string {
 
 		// 2 chars for prefix space alignment with dir panel
 		prefix := "  "
-		dots := lineWidth - len(name) - len(sz) - 2
+		dots := lineWidth - runewidth.StringWidth(name) - runewidth.StringWidth(sz) - 2
 		if dots < 3 {
 			dots = 3
 		}
@@ -359,10 +360,19 @@ func truncate(s string, max int) string {
 	if max < 4 {
 		max = 4
 	}
-	if len(s) <= max {
+	if runewidth.StringWidth(s) <= max {
 		return s
 	}
-	return s[:max-1] + "…"
+	// Truncate rune-by-rune to respect display width
+	w := 0
+	for i, r := range s {
+		rw := runewidth.RuneWidth(r)
+		if w+rw > max-1 {
+			return s[:i] + "…"
+		}
+		w += rw
+	}
+	return s
 }
 
 func dirSubtitle(subDirs, subFiles int) string {
