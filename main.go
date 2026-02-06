@@ -23,6 +23,9 @@ var (
 			Foreground(lipgloss.Color("#00ff66")).
 			Bold(true)
 
+	// Separator under title
+	sepStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#003d1a"))
+
 	// Dir names
 	dirNameStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#00ff66"))
 	dotDirStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("#005c2e"))
@@ -31,14 +34,17 @@ var (
 	fileNameStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#00cc55"))
 	dotFileStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("#005c2e"))
 
-	// Size subtitle
-	subStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#003d1a")).Italic(true)
+	// Metadata (size, child counts)
+	metaStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#006633"))
+
+	// Dot leader
+	dotLeaderStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#002211"))
 
 	// Symlinks
 	symNameStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#00ffaa"))
 
 	// Footer
-	countStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#003d1a"))
+	countStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#004d26"))
 
 	// Error
 	errStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#ff3334"))
@@ -178,7 +184,7 @@ func main() {
 		innerW = 20
 	}
 
-	nameMax := innerW - 4 // account for padding inside box
+	nameMax := innerW - 6 // content area minus padding
 	if nameMax > maxNameLen {
 		nameMax = maxNameLen
 	}
@@ -186,7 +192,7 @@ func main() {
 	boxStyle := lipgloss.NewStyle().
 		Border(boxBorder).
 		BorderForeground(lipgloss.Color("#004d26")).
-		Padding(0, 2).
+		Padding(1, 2).
 		Width(innerW)
 
 	// Build dir content
@@ -207,7 +213,7 @@ func main() {
 		wideBox := lipgloss.NewStyle().
 			Border(boxBorder).
 			BorderForeground(lipgloss.Color("#004d26")).
-			Padding(0, 2).
+			Padding(1, 2).
 			Width(wideInner)
 		fc := buildFileContent(files, wideMax)
 		panel := wideBox.Render(titleStyle.Render("FILES") + "\n" + fc)
@@ -230,7 +236,7 @@ func main() {
 		wideBox := lipgloss.NewStyle().
 			Border(boxBorder).
 			BorderForeground(lipgloss.Color("#004d26")).
-			Padding(0, 2).
+			Padding(1, 2).
 			Width(wideInner)
 		dc := buildDirContent(dirs, wideMax)
 		panel := wideBox.Render(titleStyle.Render("DIRS") + "\n" + dc)
@@ -253,48 +259,62 @@ func main() {
 	printFooter(len(dirs), len(files))
 }
 
-func buildDirContent(dirs []entry, nameMax int) string {
+func buildDirContent(dirs []entry, lineWidth int) string {
 	var lines []string
 	for _, d := range dirs {
 		sub := dirSubtitle(d.subDirs, d.subFiles)
-		nameLimit := nameMax - len(sub) - 2
+		nameLimit := lineWidth - len(sub) - 3
 		if nameLimit < 10 {
 			nameLimit = 10
 		}
 		name := truncate(d.name, nameLimit)
-		var styled string
+
+		var styledName string
 		switch {
 		case d.isSym:
-			styled = symNameStyle.Render(name)
+			styledName = symNameStyle.Render(name)
 		case d.dot:
-			styled = dotDirStyle.Render(name)
+			styledName = dotDirStyle.Render(name)
 		default:
-			styled = dirNameStyle.Render(name)
+			styledName = dirNameStyle.Render(name)
 		}
-		lines = append(lines, styled+"  "+subStyle.Render(sub))
+
+		dots := lineWidth - len(name) - len(sub)
+		if dots < 3 {
+			dots = 3
+		}
+		leader := " " + dotLeaderStyle.Render(strings.Repeat("·", dots-2)) + " "
+		lines = append(lines, styledName+leader+metaStyle.Render(sub))
 	}
 	return strings.Join(lines, "\n")
 }
 
-func buildFileContent(files []entry, nameMax int) string {
+func buildFileContent(files []entry, lineWidth int) string {
 	var lines []string
 	for _, f := range files {
 		sz := humanSize(f.size)
-		nameLimit := nameMax - len(sz) - 2
+		nameLimit := lineWidth - len(sz) - 3
 		if nameLimit < 10 {
 			nameLimit = 10
 		}
 		name := truncate(f.name, nameLimit)
-		var styled string
+
+		var styledName string
 		switch {
 		case f.isSym:
-			styled = symNameStyle.Render(name)
+			styledName = symNameStyle.Render(name)
 		case f.dot:
-			styled = dotFileStyle.Render(name)
+			styledName = dotFileStyle.Render(name)
 		default:
-			styled = fileNameStyle.Render(name)
+			styledName = fileNameStyle.Render(name)
 		}
-		lines = append(lines, styled+"  "+subStyle.Render(sz))
+
+		dots := lineWidth - len(name) - len(sz)
+		if dots < 3 {
+			dots = 3
+		}
+		leader := " " + dotLeaderStyle.Render(strings.Repeat("·", dots-2)) + " "
+		lines = append(lines, styledName+leader+metaStyle.Render(sz))
 	}
 	return strings.Join(lines, "\n")
 }
