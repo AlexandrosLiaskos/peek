@@ -5,14 +5,22 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/lipgloss"
 	"golang.org/x/term"
 )
 
-const maxNameLen = 40
+const (
+	maxNameLen  = 40
+	minFontSize = 7.0
+)
+
+var fontSizeRe = regexp.MustCompile(`(?m)^size\s*=\s*([0-9.]+)`)
 
 var (
 	// Box border
@@ -171,17 +179,37 @@ func main() {
 		height = h
 	}
 
-	// Available content lines inside a box:
-	// total height - 2 (top/bottom border) - 2 (padding) - 3 (title + blank + blank after) - 2 (outer blank + footer)
-	maxContentLines := height - 9
-	if maxContentLines < 5 {
-		maxContentLines = 5
+	// Calculate needed terminal height
+	dirLines := len(dirs) * 2  // name + subtitle per dir
+	fileLines := len(files) * 2 // name + size per file
+	contentLines := dirLines
+	if fileLines > contentLines {
+		contentLines = fileLines
 	}
+	neededHeight := contentLines + 10 // box chrome + margins
 
-	// Cap entries to fit terminal
-	dirs, dirOverflow := capDirs(dirs, maxContentLines)
-	// Files use 2 lines each (name + size)
-	files, fileOverflow := capFiles(files, maxContentLines)
+	// Auto-configure Alacritty font size if content overflows
+	cfgPath := alacrittyConfigPath()
+	var originalFontSize float64
+	if neededHeight > height && cfgPath != "" {
+		originalFontSize = readFontSize(cfgPath)
+		if originalFontSize > 0 {
+			newSize := originalFontSize * float64(height) / float64(neededHeight)
+			if newSize < minFontSize {
+				newSize = minFontSize
+			}
+			if newSize < originalFontSize {
+				writeFontSize(cfgPath, newSize)
+				defer writeFontSize(cfgPath, originalFontSize)
+				time.Sleep(200 * time.Millisecond)
+				// Re-query terminal size after font change
+				if w, h, err := term.GetSize(int(os.Stdout.Fd())); err == nil && w > 0 {
+					width = w
+					height = h
+				}
+			}
+		}
+	}
 
 	gap := 2
 	// Border takes 2 chars each side + 2 padding = 6 per panel
@@ -204,9 +232,9 @@ func main() {
 		Width(innerW)
 
 	// Build dir content
-	dirContent := buildDirContent(dirs, nameMax, dirOverflow)
+	dirContent := buildDirContent(dirs, nameMax)
 	// Build file content
-	fileContent := buildFileContent(files, nameMax, fileOverflow)
+	fileContent := buildFileContent(files, nameMax)
 
 	// Single panel modes
 	if filesOnly || len(dirs) == 0 {
@@ -223,12 +251,12 @@ func main() {
 			BorderForeground(lipgloss.Color("#004d26")).
 			Padding(1, 2).
 			Width(wideInner)
-		fc := buildFileContent(files, wideMax, fileOverflow)
+		fc := buildFileContent(files, wideMax)
 		panel := wideBox.Render(titleStyle.Render("FILES") + "\n\n" + fc)
 		fmt.Println()
 		fmt.Println(panel)
 		fmt.Println()
-		printFooter(len(dirs)+dirOverflow, len(files)+fileOverflow)
+		printFooter(len(dirs), len(files))
 		return
 	}
 
@@ -246,12 +274,12 @@ func main() {
 			BorderForeground(lipgloss.Color("#004d26")).
 			Padding(1, 2).
 			Width(wideInner)
-		dc := buildDirContent(dirs, wideMax, dirOverflow)
+		dc := buildDirContent(dirs, wideMax)
 		panel := wideBox.Render(titleStyle.Render("DIRS") + "\n\n" + dc)
 		fmt.Println()
 		fmt.Println(panel)
 		fmt.Println()
-		printFooter(len(dirs)+dirOverflow, len(files)+fileOverflow)
+		printFooter(len(dirs), len(files))
 		return
 	}
 
@@ -264,42 +292,47 @@ func main() {
 	fmt.Println()
 	fmt.Println(joined)
 	fmt.Println()
-	printFooter(len(dirs)+dirOverflow, len(files)+fileOverflow)
+	printFooter(len(dirs), len(files))
 }
 
-func capDirs(dirs []entry, maxLines int) ([]entry, int) {
-	// Each dir takes 2 lines (name + subtitle)
-	maxItems := maxLines / 2
-	if maxItems < 1 {
-		maxItems = 1
+func alacrittyConfigPath() string {
+	appdata := os.Getenv("APPDATA")
+	if appdata == "" {
+		return ""
 	}
-	if len(dirs) <= maxItems {
-		return dirs, 0
+	p := filepath.Join(appdata, "alacritty", "alacritty.toml")
+	if _, err := os.Stat(p); err != nil {
+		return ""
 	}
-	show := maxItems - 1 // Reserve space for "+... more"
-	if show < 1 {
-		show = 1
-	}
-	return dirs[:show], len(dirs) - show
+	return p
 }
 
-func capFiles(files []entry, maxLines int) ([]entry, int) {
-	// Each file takes 2 lines (name + size)
-	maxItems := maxLines / 2
-	if maxItems < 1 {
-		maxItems = 1
+func readFontSize(cfgPath string) float64 {
+	data, err := os.ReadFile(cfgPath)
+	if err != nil {
+		return 0
 	}
-	if len(files) <= maxItems {
-		return files, 0
+	m := fontSizeRe.FindSubmatch(data)
+	if m == nil {
+		return 0
 	}
-	show := maxItems - 1 // Reserve space for "+N more"
-	if show < 1 {
-		show = 1
+	sz, err := strconv.ParseFloat(string(m[1]), 64)
+	if err != nil {
+		return 0
 	}
-	return files[:show], len(files) - show
+	return sz
 }
 
-func buildDirContent(dirs []entry, nameMax int, overflow int) string {
+func writeFontSize(cfgPath string, size float64) {
+	data, err := os.ReadFile(cfgPath)
+	if err != nil {
+		return
+	}
+	newData := fontSizeRe.ReplaceAll(data, []byte(fmt.Sprintf("size = %.1f", size)))
+	os.WriteFile(cfgPath, newData, 0644)
+}
+
+func buildDirContent(dirs []entry, nameMax int) string {
 	var lines []string
 	for _, d := range dirs {
 		name := truncate(d.name, nameMax)
@@ -314,13 +347,10 @@ func buildDirContent(dirs []entry, nameMax int, overflow int) string {
 		// Subtitle: subfolder and subfile counts
 		lines = append(lines, subStyle.Render(dirSubtitle(d.subDirs, d.subFiles)))
 	}
-	if overflow > 0 {
-		lines = append(lines, countStyle.Render("+... more"))
-	}
 	return strings.Join(lines, "\n")
 }
 
-func buildFileContent(files []entry, nameMax int, overflow int) string {
+func buildFileContent(files []entry, nameMax int) string {
 	var lines []string
 	for _, f := range files {
 		name := truncate(f.name, nameMax)
@@ -333,10 +363,7 @@ func buildFileContent(files []entry, nameMax int, overflow int) string {
 			lines = append(lines, fileNameStyle.Render(name))
 		}
 
-			lines = append(lines, subStyle.Render(humanSize(f.size)))
-	}
-	if overflow > 0 {
-		lines = append(lines, countStyle.Render("+... more"))
+		lines = append(lines, subStyle.Render(humanSize(f.size)))
 	}
 	return strings.Join(lines, "\n")
 }
