@@ -5,22 +5,14 @@ import (
 	"math"
 	"os"
 	"path/filepath"
-	"regexp"
 	"sort"
-	"strconv"
 	"strings"
-	"time"
 
 	"github.com/charmbracelet/lipgloss"
 	"golang.org/x/term"
 )
 
-const (
-	maxNameLen  = 40
-	minFontSize = 7.0
-)
-
-var fontSizeRe = regexp.MustCompile(`(?m)^size\s*=\s*([0-9.]+)`)
+const maxNameLen = 40
 
 var (
 	// Box border
@@ -171,44 +163,10 @@ func main() {
 		return
 	}
 
-	// Terminal size
+	// Terminal width
 	width := 80
-	height := 24
-	if w, h, err := term.GetSize(int(os.Stdout.Fd())); err == nil && w > 0 {
+	if w, _, err := term.GetSize(int(os.Stdout.Fd())); err == nil && w > 0 {
 		width = w
-		height = h
-	}
-
-	// Calculate needed terminal height
-	dirLines := len(dirs) * 2  // name + subtitle per dir
-	fileLines := len(files) * 2 // name + size per file
-	contentLines := dirLines
-	if fileLines > contentLines {
-		contentLines = fileLines
-	}
-	neededHeight := contentLines + 10 // box chrome + margins
-
-	// Auto-configure Alacritty font size if content overflows
-	cfgPath := alacrittyConfigPath()
-	var originalFontSize float64
-	if neededHeight > height && cfgPath != "" {
-		originalFontSize = readFontSize(cfgPath)
-		if originalFontSize > 0 {
-			newSize := originalFontSize * float64(height) / float64(neededHeight)
-			if newSize < minFontSize {
-				newSize = minFontSize
-			}
-			if newSize < originalFontSize {
-				writeFontSize(cfgPath, newSize)
-				defer writeFontSize(cfgPath, originalFontSize)
-				time.Sleep(200 * time.Millisecond)
-				// Re-query terminal size after font change
-				if w, h, err := term.GetSize(int(os.Stdout.Fd())); err == nil && w > 0 {
-					width = w
-					height = h
-				}
-			}
-		}
 	}
 
 	gap := 2
@@ -293,43 +251,6 @@ func main() {
 	fmt.Println(joined)
 	fmt.Println()
 	printFooter(len(dirs), len(files))
-}
-
-func alacrittyConfigPath() string {
-	appdata := os.Getenv("APPDATA")
-	if appdata == "" {
-		return ""
-	}
-	p := filepath.Join(appdata, "alacritty", "alacritty.toml")
-	if _, err := os.Stat(p); err != nil {
-		return ""
-	}
-	return p
-}
-
-func readFontSize(cfgPath string) float64 {
-	data, err := os.ReadFile(cfgPath)
-	if err != nil {
-		return 0
-	}
-	m := fontSizeRe.FindSubmatch(data)
-	if m == nil {
-		return 0
-	}
-	sz, err := strconv.ParseFloat(string(m[1]), 64)
-	if err != nil {
-		return 0
-	}
-	return sz
-}
-
-func writeFontSize(cfgPath string, size float64) {
-	data, err := os.ReadFile(cfgPath)
-	if err != nil {
-		return
-	}
-	newData := fontSizeRe.ReplaceAll(data, []byte(fmt.Sprintf("size = %.1f", size)))
-	os.WriteFile(cfgPath, newData, 0644)
 }
 
 func buildDirContent(dirs []entry, nameMax int) string {
