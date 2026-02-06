@@ -23,28 +23,31 @@ var (
 			Foreground(lipgloss.Color("#00ff66")).
 			Bold(true)
 
-	// Separator under title
+	// Separator line
 	sepStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#003d1a"))
 
+	// Dir indicator
+	dirIndicator = lipgloss.NewStyle().Foreground(lipgloss.Color("#008844"))
+
 	// Dir names
-	dirNameStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#00ff66"))
-	dotDirStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("#005c2e"))
+	dirNameStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#00ff66")).Bold(true)
+	dotDirStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("#006633"))
 
 	// File names
-	fileNameStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#00cc55"))
+	fileNameStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#00dd55"))
 	dotFileStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("#005c2e"))
 
 	// Metadata (size, child counts)
-	metaStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#006633"))
+	metaStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#008844"))
 
 	// Dot leader
-	dotLeaderStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#002211"))
+	dotLeaderStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#002a11"))
 
 	// Symlinks
-	symNameStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#00ffaa"))
+	symNameStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#00ffaa")).Italic(true)
 
 	// Footer
-	countStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#004d26"))
+	countStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#006633"))
 
 	// Error
 	errStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#ff3334"))
@@ -196,8 +199,10 @@ func main() {
 		Width(innerW)
 
 	// Build dir content
+	dirHeader := makeHeader("DIRS", nameMax)
 	dirContent := buildDirContent(dirs, nameMax)
 	// Build file content
+	fileHeader := makeHeader("FILES", nameMax)
 	fileContent := buildFileContent(files, nameMax)
 
 	// Single panel modes
@@ -216,7 +221,8 @@ func main() {
 			Padding(1, 2).
 			Width(wideInner)
 		fc := buildFileContent(files, wideMax)
-		panel := wideBox.Render(titleStyle.Render("FILES") + "\n" + fc)
+		fh := makeHeader("FILES", wideMax)
+		panel := wideBox.Render(fh + fc)
 		fmt.Println()
 		fmt.Println(panel)
 		fmt.Println()
@@ -239,7 +245,8 @@ func main() {
 			Padding(1, 2).
 			Width(wideInner)
 		dc := buildDirContent(dirs, wideMax)
-		panel := wideBox.Render(titleStyle.Render("DIRS") + "\n" + dc)
+		dh := makeHeader("DIRS", wideMax)
+		panel := wideBox.Render(dh + dc)
 		fmt.Println()
 		fmt.Println(panel)
 		fmt.Println()
@@ -248,8 +255,8 @@ func main() {
 	}
 
 	// Two panels side by side
-	leftPanel := boxStyle.Render(titleStyle.Render("DIRS") + "\n" + dirContent)
-	rightPanel := boxStyle.Render(titleStyle.Render("FILES") + "\n" + fileContent)
+	leftPanel := boxStyle.Render(dirHeader + dirContent)
+	rightPanel := boxStyle.Render(fileHeader + fileContent)
 
 	joined := lipgloss.JoinHorizontal(lipgloss.Top, leftPanel, strings.Repeat(" ", gap), rightPanel)
 
@@ -259,13 +266,19 @@ func main() {
 	printFooter(len(dirs), len(files))
 }
 
+func makeHeader(title string, lineWidth int) string {
+	line := sepStyle.Render(strings.Repeat("─", lineWidth))
+	return titleStyle.Render(title) + "\n" + line + "\n"
+}
+
 func buildDirContent(dirs []entry, lineWidth int) string {
 	var lines []string
 	for _, d := range dirs {
 		sub := dirSubtitle(d.subDirs, d.subFiles)
-		nameLimit := lineWidth - len(sub) - 3
-		if nameLimit < 10 {
-			nameLimit = 10
+		// ▸ prefix takes 2 chars
+		nameLimit := lineWidth - len(sub) - 5
+		if nameLimit < 8 {
+			nameLimit = 8
 		}
 		name := truncate(d.name, nameLimit)
 
@@ -279,12 +292,13 @@ func buildDirContent(dirs []entry, lineWidth int) string {
 			styledName = dirNameStyle.Render(name)
 		}
 
-		dots := lineWidth - len(name) - len(sub)
+		prefix := dirIndicator.Render("▸") + " "
+		dots := lineWidth - len(name) - len(sub) - 2
 		if dots < 3 {
 			dots = 3
 		}
 		leader := " " + dotLeaderStyle.Render(strings.Repeat("·", dots-2)) + " "
-		lines = append(lines, styledName+leader+metaStyle.Render(sub))
+		lines = append(lines, prefix+styledName+leader+metaStyle.Render(sub))
 	}
 	return strings.Join(lines, "\n")
 }
@@ -293,9 +307,9 @@ func buildFileContent(files []entry, lineWidth int) string {
 	var lines []string
 	for _, f := range files {
 		sz := humanSize(f.size)
-		nameLimit := lineWidth - len(sz) - 3
-		if nameLimit < 10 {
-			nameLimit = 10
+		nameLimit := lineWidth - len(sz) - 5
+		if nameLimit < 8 {
+			nameLimit = 8
 		}
 		name := truncate(f.name, nameLimit)
 
@@ -309,12 +323,14 @@ func buildFileContent(files []entry, lineWidth int) string {
 			styledName = fileNameStyle.Render(name)
 		}
 
-		dots := lineWidth - len(name) - len(sz)
+		// 2 chars for prefix space alignment with dir panel
+		prefix := "  "
+		dots := lineWidth - len(name) - len(sz) - 2
 		if dots < 3 {
 			dots = 3
 		}
 		leader := " " + dotLeaderStyle.Render(strings.Repeat("·", dots-2)) + " "
-		lines = append(lines, styledName+leader+metaStyle.Render(sz))
+		lines = append(lines, prefix+styledName+leader+metaStyle.Render(sz))
 	}
 	return strings.Join(lines, "\n")
 }
@@ -335,7 +351,7 @@ func printFooter(dirCount, fileCount int) {
 		}
 		parts = append(parts, s)
 	}
-	fmt.Println("  " + countStyle.Render(strings.Join(parts, ", ")))
+	fmt.Println("  " + countStyle.Render(strings.Join(parts, "  ·  ")))
 	fmt.Println()
 }
 
