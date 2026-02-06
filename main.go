@@ -144,11 +144,25 @@ func main() {
 		return
 	}
 
-	// Terminal width
+	// Terminal size
 	width := 80
-	if w, _, err := term.GetSize(int(os.Stdout.Fd())); err == nil && w > 0 {
+	height := 24
+	if w, h, err := term.GetSize(int(os.Stdout.Fd())); err == nil && w > 0 {
 		width = w
+		height = h
 	}
+
+	// Available content lines inside a box:
+	// total height - 2 (top/bottom border) - 2 (padding) - 3 (title + blank + blank after) - 2 (outer blank + footer)
+	maxContentLines := height - 9
+	if maxContentLines < 5 {
+		maxContentLines = 5
+	}
+
+	// Cap entries to fit terminal
+	dirs, dirOverflow := capDirs(dirs, maxContentLines)
+	// Files use 2 lines each (name + size)
+	files, fileOverflow := capFiles(files, maxContentLines)
 
 	gap := 2
 	// Border takes 2 chars each side + 2 padding = 6 per panel
@@ -171,9 +185,9 @@ func main() {
 		Width(innerW)
 
 	// Build dir content
-	dirContent := buildDirContent(dirs, nameMax)
+	dirContent := buildDirContent(dirs, nameMax, dirOverflow)
 	// Build file content
-	fileContent := buildFileContent(files, nameMax)
+	fileContent := buildFileContent(files, nameMax, fileOverflow)
 
 	// Single panel modes
 	if filesOnly || len(dirs) == 0 {
@@ -190,12 +204,12 @@ func main() {
 			BorderForeground(lipgloss.Color("#004d26")).
 			Padding(1, 2).
 			Width(wideInner)
-		fc := buildFileContent(files, wideMax)
+		fc := buildFileContent(files, wideMax, fileOverflow)
 		panel := wideBox.Render(titleStyle.Render("FILES") + "\n\n" + fc)
 		fmt.Println()
 		fmt.Println(panel)
 		fmt.Println()
-		printFooter(len(dirs), len(files))
+		printFooter(len(dirs)+dirOverflow, len(files)+fileOverflow)
 		return
 	}
 
@@ -213,12 +227,12 @@ func main() {
 			BorderForeground(lipgloss.Color("#004d26")).
 			Padding(1, 2).
 			Width(wideInner)
-		dc := buildDirContent(dirs, wideMax)
+		dc := buildDirContent(dirs, wideMax, dirOverflow)
 		panel := wideBox.Render(titleStyle.Render("DIRS") + "\n\n" + dc)
 		fmt.Println()
 		fmt.Println(panel)
 		fmt.Println()
-		printFooter(len(dirs), len(files))
+		printFooter(len(dirs)+dirOverflow, len(files)+fileOverflow)
 		return
 	}
 
@@ -231,10 +245,38 @@ func main() {
 	fmt.Println()
 	fmt.Println(joined)
 	fmt.Println()
-	printFooter(len(dirs), len(files))
+	printFooter(len(dirs)+dirOverflow, len(files)+fileOverflow)
 }
 
-func buildDirContent(dirs []entry, nameMax int) string {
+func capDirs(dirs []entry, maxLines int) ([]entry, int) {
+	if len(dirs) <= maxLines {
+		return dirs, 0
+	}
+	// Reserve 1 line for "+N more" message
+	show := maxLines - 1
+	if show < 1 {
+		show = 1
+	}
+	return dirs[:show], len(dirs) - show
+}
+
+func capFiles(files []entry, maxLines int) ([]entry, int) {
+	// Each file takes 2 lines (name + size)
+	maxItems := maxLines / 2
+	if maxItems < 1 {
+		maxItems = 1
+	}
+	if len(files) <= maxItems {
+		return files, 0
+	}
+	show := maxItems - 1 // Reserve space for "+N more"
+	if show < 1 {
+		show = 1
+	}
+	return files[:show], len(files) - show
+}
+
+func buildDirContent(dirs []entry, nameMax int, overflow int) string {
 	var lines []string
 	for _, d := range dirs {
 		name := truncate(d.name, nameMax)
@@ -247,10 +289,13 @@ func buildDirContent(dirs []entry, nameMax int) string {
 			lines = append(lines, dirNameStyle.Render(name))
 		}
 	}
+	if overflow > 0 {
+		lines = append(lines, countStyle.Render(fmt.Sprintf("+%d more", overflow)))
+	}
 	return strings.Join(lines, "\n")
 }
 
-func buildFileContent(files []entry, nameMax int) string {
+func buildFileContent(files []entry, nameMax int, overflow int) string {
 	var lines []string
 	for _, f := range files {
 		name := truncate(f.name, nameMax)
@@ -263,11 +308,10 @@ func buildFileContent(files []entry, nameMax int) string {
 			lines = append(lines, fileNameStyle.Render(name))
 		}
 
-		parts := []string{humanSize(f.size)}
-		if f.ext != "" {
-			parts = append(parts, f.ext)
-		}
-		lines = append(lines, subStyle.Render(strings.Join(parts, " · ")))
+			lines = append(lines, subStyle.Render(humanSize(f.size)))
+	}
+	if overflow > 0 {
+		lines = append(lines, countStyle.Render(fmt.Sprintf("+%d more", overflow)))
 	}
 	return strings.Join(lines, "\n")
 }
