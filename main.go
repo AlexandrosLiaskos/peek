@@ -178,7 +178,7 @@ func main() {
 		innerW = 20
 	}
 
-	nameMax := innerW - 2
+	nameMax := innerW - 4 // account for padding inside box
 	if nameMax > maxNameLen {
 		nameMax = maxNameLen
 	}
@@ -186,7 +186,7 @@ func main() {
 	boxStyle := lipgloss.NewStyle().
 		Border(boxBorder).
 		BorderForeground(lipgloss.Color("#004d26")).
-		Padding(1, 2).
+		Padding(0, 2).
 		Width(innerW)
 
 	// Build dir content
@@ -207,10 +207,10 @@ func main() {
 		wideBox := lipgloss.NewStyle().
 			Border(boxBorder).
 			BorderForeground(lipgloss.Color("#004d26")).
-			Padding(1, 2).
+			Padding(0, 2).
 			Width(wideInner)
 		fc := buildFileContent(files, wideMax)
-		panel := wideBox.Render(titleStyle.Render("FILES") + "\n\n" + fc)
+		panel := wideBox.Render(titleStyle.Render("FILES") + "\n" + fc)
 		fmt.Println()
 		fmt.Println(panel)
 		fmt.Println()
@@ -230,10 +230,10 @@ func main() {
 		wideBox := lipgloss.NewStyle().
 			Border(boxBorder).
 			BorderForeground(lipgloss.Color("#004d26")).
-			Padding(1, 2).
+			Padding(0, 2).
 			Width(wideInner)
 		dc := buildDirContent(dirs, wideMax)
-		panel := wideBox.Render(titleStyle.Render("DIRS") + "\n\n" + dc)
+		panel := wideBox.Render(titleStyle.Render("DIRS") + "\n" + dc)
 		fmt.Println()
 		fmt.Println(panel)
 		fmt.Println()
@@ -242,8 +242,8 @@ func main() {
 	}
 
 	// Two panels side by side
-	leftPanel := boxStyle.Render(titleStyle.Render("DIRS") + "\n\n" + dirContent)
-	rightPanel := boxStyle.Render(titleStyle.Render("FILES") + "\n\n" + fileContent)
+	leftPanel := boxStyle.Render(titleStyle.Render("DIRS") + "\n" + dirContent)
+	rightPanel := boxStyle.Render(titleStyle.Render("FILES") + "\n" + fileContent)
 
 	joined := lipgloss.JoinHorizontal(lipgloss.Top, leftPanel, strings.Repeat(" ", gap), rightPanel)
 
@@ -256,17 +256,22 @@ func main() {
 func buildDirContent(dirs []entry, nameMax int) string {
 	var lines []string
 	for _, d := range dirs {
-		name := truncate(d.name, nameMax)
+		sub := dirSubtitle(d.subDirs, d.subFiles)
+		nameLimit := nameMax - len(sub) - 2
+		if nameLimit < 10 {
+			nameLimit = 10
+		}
+		name := truncate(d.name, nameLimit)
+		var styled string
 		switch {
 		case d.isSym:
-			lines = append(lines, symNameStyle.Render(name))
+			styled = symNameStyle.Render(name)
 		case d.dot:
-			lines = append(lines, dotDirStyle.Render(name))
+			styled = dotDirStyle.Render(name)
 		default:
-			lines = append(lines, dirNameStyle.Render(name))
+			styled = dirNameStyle.Render(name)
 		}
-		// Subtitle: subfolder and subfile counts
-		lines = append(lines, subStyle.Render(dirSubtitle(d.subDirs, d.subFiles)))
+		lines = append(lines, styled+"  "+subStyle.Render(sub))
 	}
 	return strings.Join(lines, "\n")
 }
@@ -274,17 +279,22 @@ func buildDirContent(dirs []entry, nameMax int) string {
 func buildFileContent(files []entry, nameMax int) string {
 	var lines []string
 	for _, f := range files {
-		name := truncate(f.name, nameMax)
+		sz := humanSize(f.size)
+		nameLimit := nameMax - len(sz) - 2
+		if nameLimit < 10 {
+			nameLimit = 10
+		}
+		name := truncate(f.name, nameLimit)
+		var styled string
 		switch {
 		case f.isSym:
-			lines = append(lines, symNameStyle.Render(name))
+			styled = symNameStyle.Render(name)
 		case f.dot:
-			lines = append(lines, dotFileStyle.Render(name))
+			styled = dotFileStyle.Render(name)
 		default:
-			lines = append(lines, fileNameStyle.Render(name))
+			styled = fileNameStyle.Render(name)
 		}
-
-		lines = append(lines, subStyle.Render(humanSize(f.size)))
+		lines = append(lines, styled+"  "+subStyle.Render(sz))
 	}
 	return strings.Join(lines, "\n")
 }
