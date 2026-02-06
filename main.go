@@ -45,12 +45,14 @@ var (
 )
 
 type entry struct {
-	name  string
-	isDir bool
-	isSym bool
-	size  int64
-	dot   bool
-	ext   string
+	name     string
+	isDir    bool
+	isSym    bool
+	size     int64
+	dot      bool
+	ext      string
+	subDirs  int
+	subFiles int
 }
 
 func main() {
@@ -125,6 +127,20 @@ func main() {
 		}
 
 		if isDir && !filesOnly {
+			// Count immediate children
+			subEntries, err := os.ReadDir(filepath.Join(target, name))
+			if err == nil {
+				for _, se := range subEntries {
+					if !showAll && strings.HasPrefix(se.Name(), ".") {
+						continue
+					}
+					if se.IsDir() {
+						it.subDirs++
+					} else {
+						it.subFiles++
+					}
+				}
+			}
 			dirs = append(dirs, it)
 		} else if !isDir {
 			files = append(files, it)
@@ -137,7 +153,10 @@ func main() {
 		})
 	}
 	sortEntries(dirs)
-	sortEntries(files)
+	// Sort files by decreasing size
+	sort.Slice(files, func(i, j int) bool {
+		return files[i].size > files[j].size
+	})
 
 	if len(dirs) == 0 && len(files) == 0 {
 		fmt.Println(countStyle.Render("  empty"))
@@ -249,11 +268,15 @@ func main() {
 }
 
 func capDirs(dirs []entry, maxLines int) ([]entry, int) {
-	if len(dirs) <= maxLines {
+	// Each dir takes 2 lines (name + subtitle)
+	maxItems := maxLines / 2
+	if maxItems < 1 {
+		maxItems = 1
+	}
+	if len(dirs) <= maxItems {
 		return dirs, 0
 	}
-	// Reserve 1 line for "+N more" message
-	show := maxLines - 1
+	show := maxItems - 1 // Reserve space for "+... more"
 	if show < 1 {
 		show = 1
 	}
@@ -288,9 +311,11 @@ func buildDirContent(dirs []entry, nameMax int, overflow int) string {
 		default:
 			lines = append(lines, dirNameStyle.Render(name))
 		}
+		// Subtitle: subfolder and subfile counts
+		lines = append(lines, subStyle.Render(dirSubtitle(d.subDirs, d.subFiles)))
 	}
 	if overflow > 0 {
-		lines = append(lines, countStyle.Render(fmt.Sprintf("+%d more", overflow)))
+		lines = append(lines, countStyle.Render("+... more"))
 	}
 	return strings.Join(lines, "\n")
 }
@@ -311,7 +336,7 @@ func buildFileContent(files []entry, nameMax int, overflow int) string {
 			lines = append(lines, subStyle.Render(humanSize(f.size)))
 	}
 	if overflow > 0 {
-		lines = append(lines, countStyle.Render(fmt.Sprintf("+%d more", overflow)))
+		lines = append(lines, countStyle.Render("+... more"))
 	}
 	return strings.Join(lines, "\n")
 }
@@ -344,6 +369,28 @@ func truncate(s string, max int) string {
 		return s
 	}
 	return s[:max-1] + "…"
+}
+
+func dirSubtitle(subDirs, subFiles int) string {
+	if subDirs == 0 && subFiles == 0 {
+		return "empty"
+	}
+	var parts []string
+	if subDirs > 0 {
+		s := fmt.Sprintf("%d dir", subDirs)
+		if subDirs > 1 {
+			s += "s"
+		}
+		parts = append(parts, s)
+	}
+	if subFiles > 0 {
+		s := fmt.Sprintf("%d file", subFiles)
+		if subFiles > 1 {
+			s += "s"
+		}
+		parts = append(parts, s)
+	}
+	return strings.Join(parts, ", ")
 }
 
 func humanSize(b int64) string {
